@@ -1,0 +1,298 @@
+---
+title: "Case Study 1 -Bike-share"
+author: "Breanyl Baker"
+date: "2023-07-29"
+output: html_document
+---
+
+
+#### Load the packages needed.
+```{r warning=FALSE}
+library(tidyverse)
+library(dplyr)
+library(chron)
+library(ggplot2)
+library(hms)
+library(lubridate)
+library(skimr)
+library(tibble)
+library(scales)
+```
+
+#### Read in the merged dataset which has the past 12 months of trip data. 
+```{r warning=FALSE, paged.print=TRUE}
+full_trip_data <- data.frame(read_csv("D:\\Divvy_Tripdata\\full_trip_data.csv"))
+View(full_trip_data)
+```
+
+#### Looking at the data structure.
+```{r warning=FALSE}
+head(full_trip_data)
+glimpse(full_trip_data)
+colnames(full_trip_data)
+```
+
+#### Checking if there are any missing values after merging.
+```{r}
+any(is.na(full_trip_data))
+```
+
+#### Created a dataframe with the data columns that will be in use for this analysis.
+```{r warning=FALSE}
+{trip_subdata <- subset(full_trip_data, 
+                        select = c(ride_id, rideable_type, started_at,
+                                    ended_at,member_casual,ride_length,day_of_week))}
+View(trip_subdata)
+```
+
+#### Checking if there are any missing values after removing the columns.
+```{r warning=FALSE}
+any(is.na(trip_subdata))
+```
+
+
+#### Have to convert ride length to seconds to find the mean.
+```{r warning=FALSE}
+parsed_ride_length <- hms::parse_hm(trip_subdata$ride_length)
+# Convert parsed times to hms format
+trip_subdata$ride_length_seconds <- as_hms(parsed_ride_length)
+# Convert hms to Period format
+trip_subdata$ride_length_seconds <- as.period(trip_subdata$ride_length_seconds)
+# Calculate ride_length_period (in seconds)
+trip_subdata$ride_length_seconds <- period_to_seconds(trip_subdata$ride_length_seconds)
+```
+
+
+#### Doing basic statistics to find the mean length and most frequent day users ride. 
+```{r warning=FALSE}
+#Get the mean ride length and the most frequent day of week 
+summary_stat <- trip_subdata %>%
+  summarize(
+    mean_ride_length = hms::hms(seconds = mean(ride_length_seconds,na.rm = TRUE)),
+    mode_day_of_week = as.numeric(names(table(day_of_week)[table(day_of_week) == max(table(day_of_week))]))
+  )
+
+print(summary_stat)
+```
+
+
+#### Checking to see which users take longer or shorter rides.
+```{r warning=FALSE}
+# Check who took more rides longer then and equal to 30 mins
+greaterthen1800 <- trip_subdata %>%
+  filter(ride_length_seconds >= 1800) %>%
+  group_by(member_casual)%>%
+  summarise(num_rides = n())
+
+print(greaterthen1800)
+
+# Check who took more rides shorter then 30 mins
+lessthen1800 <- trip_subdata %>%
+  filter(ride_length_seconds < 1800) %>%
+  group_by(member_casual)%>%
+  summarise(num_rides = n())
+
+print(lessthen1800)
+
+```
+
+
+#### Checking to see how members and casual users ride length and number of rides differ across the full dataset
+```{r warning=FALSE}
+#Get the mean ride length for each user type member and casual
+mean_ride_length_by_user <- trip_subdata %>%
+  group_by(member_casual) %>%
+  summarise(mean_ride_length = hms::hms(seconds = mean(ride_length_seconds,na.rm = TRUE)))
+
+print(mean_ride_length_by_user)
+
+{ggplot(mean_ride_length_by_user, aes(x = member_casual,
+                                      y = mean_ride_length, fill = member_casual)) +
+    geom_col() +
+    labs(title = "Mean Ride Length by User Type", x = "Member_Casual", y = "Mean Ride Length",
+         fill = "Member_casual")}
+```
+```{r warning=FALSE}
+#Get the number of rides each user type member and casual
+num_rides_by_user <- trip_subdata %>%
+  group_by(member_casual) %>%
+  summarise(num_rides = n())
+
+print(num_rides_by_user)
+
+{ggplot(num_rides_by_user, aes(x=member_casual, y=num_rides, fill=member_casual)) +
+    geom_col() + 
+    labs(title = "Number of Rides by Each User Type",x = "Member_Casual", y = "Number of Rides",
+         fill= "Member_casual") +
+    scale_y_continuous(labels = comma_format())
+    }
+```
+
+
+#### Checking to see how members and casual users ride length and number of rides differ each day.
+```{r warning=FALSE}
+#Get the mean ride_length for each day by user type
+user_mean_ride_length_per_day <- trip_subdata %>%
+  group_by(day_of_week = weekdays(day_of_week),member_casual) %>%
+  summarise(mean_ride_length = hms::hms(seconds = mean(ride_length_seconds,na.rm = TRUE)))
+
+print(user_mean_ride_length_per_day)
+
+{ggplot(user_mean_ride_length_per_day, aes(x=day_of_week,y=mean_ride_length,fill=member_casual, 
+                                           group=member_casual)) + geom_col(position = "dodge") +
+    labs(title = "Mean Ride Length Each Day", subtitle = "By User Type",x ="Member_Casual", y="Mean Ride Length",
+         fill ="member_casual")}
+
+```
+```{r warning=FALSE}
+#Get the number of rides each day by user type
+num_of_user_rides_each_day <- trip_subdata %>%
+  group_by(day_of_week = weekdays(day_of_week), member_casual) %>%
+  summarise(num_of_ride = n())
+
+print(num_of_user_rides_each_day)
+
+{ggplot(num_of_user_rides_each_day, aes(x=day_of_week, y=num_of_ride,fill=member_casual), group= member_casual) +
+    geom_col(position = "dodge") +
+    labs(title = "Number of Rides Each Day", subtitle = "By User Type",x ="Member_Casual", y="Number of Rides",
+         fill ="member_casual") +
+    scale_y_continuous(minor_breaks = scales::pretty_breaks(n = 10), labels = comma_format())}
+
+```
+
+
+#### Checking to see how members and casual users ride length and number of rides differ each month.
+```{r warning=FALSE}
+#Get the mean of ride length by user type for each month
+mean_rides_each_month_by_user <- trip_subdata %>%
+  group_by(month = month(mdy_hm(started_at),label=TRUE),member_casual) %>%
+  summarize(mean_ride_length = hms::hms(seconds = mean(ride_length_seconds, na.rm = TRUE)))
+
+print(mean_rides_each_month_by_user,n=24)
+
+{ggplot(mean_rides_each_month_by_user, aes(x=month, y=mean_ride_length,group=member_casual,color=member_casual)) +
+    geom_line(size=1.5) +
+    labs(title = "Mean Ride Length Each Month", subtitle = "By User Type",x ="Month", y="Mean Ride Length",
+         fill ="member_casual")}
+```
+
+```{r warning=FALSE}
+#Get the number of rides by user type for each month
+num_rides_each_month_by_user <- trip_subdata %>%
+  group_by(month = month(mdy_hm(started_at),label=TRUE),member_casual) %>%
+  summarize(num_rides = n())
+
+print(num_rides_each_month_by_user,n=24)
+
+{ggplot(num_rides_each_month_by_user, aes(x=month, y=num_rides,group=member_casual,color=member_casual)) +
+    geom_line(size=1.5) +
+    labs(title = "Number of Rides Each Month", subtitle = "By User Type",x ="Month", y="Number of Rides",
+         fill ="member_casual") +
+    scale_y_continuous(labels = comma_format())}
+```
+
+
+#### Checking to see how members and casual users ride length and number of rides differ for the three diffrent bike type.
+```{r warning=FALSE}
+#Get mean of ride length for each bicycle by user type
+bicycle_type_mean_by_user <- trip_subdata %>%
+  group_by(rideable_type,member_casual) %>%
+  summarise(mean_ride_length = hms::hms(seconds = mean(ride_length_seconds, na.rm = TRUE)))
+
+print(bicycle_type_mean_by_user)
+
+{ggplot(bicycle_type_mean_by_user, aes(x=rideable_type, y=mean_ride_length, group=member_casual,fill=member_casual)) +
+    geom_col(position = "dodge") +
+    labs(title = "Mean Ride Length of Each Type of Bike", subtitle = "By User Type",x ="Bike Type", y="Mean Ride Length",
+         fill ="member_casual")}
+```
+```{r warning=FALSE}
+#Get mean of ride length for each bicycle by user type
+bicycle_type_rides <- trip_subdata %>%
+  group_by(rideable_type,member_casual) %>%
+  summarise(num_rides = n())
+
+print(bicycle_type_rides)
+
+{ggplot(bicycle_type_rides, aes(x=rideable_type, y=num_rides, group=member_casual,fill=member_casual)) +
+    geom_col(position = "dodge") +
+    labs(title = "Number of Rides for Each Bike Type", subtitle = "By User Type",x ="Bike Type", y="Number of Rides",
+         fill ="member_casual")}
+
+```
+
+
+#### Checking the number of rides a member and casusal user take each hour to see how they    #### differ. 
+```{r warning=FALSE}
+#Get number of rides by user for each hour
+num_rides_each_hour <- trip_subdata %>%
+  group_by(hour = hour(mdy_hm(started_at)),member_casual) %>%
+  summarise(num_rides = n())
+
+print(num_rides_each_hour,n=48)
+
+{ggplot(num_rides_each_hour, aes(x=hour, y=num_rides, group=member_casual,fill=member_casual,color=member_casual)) +
+    geom_line(size =1.5) +
+    labs(title = "Number of Rides Each Hour", subtitle = "By User Type",x ="Hour", y="Number of Rides",
+         fill ="member_casual") +
+    scale_y_continuous(labels = comma_format())}
+```
+
+
+#### Checking to see how members and casual users ride length and number of rides differ during each season.
+```{r warning=FALSE}
+# Create a new column "season" based on the "started_at" date
+trip_subdata <- trip_subdata %>%
+  mutate(month = month(mdy_hms(started_at)),
+         season = case_when(
+           month %in% c(12, 1, 2) ~ "Winter",
+           month %in% c(3, 4, 5) ~ "Spring",
+           month %in% c(6, 7, 8) ~ "Summer",
+           TRUE ~ "Fall"
+         ))
+
+# Group by "season" and "member_casual" and calculate the average ride length or number of rides
+seasonal_analysis <- trip_subdata %>%
+  group_by(season, member_casual) %>%
+  summarise(
+    mean_ride_length = hms::hms(seconds = mean(ride_length_seconds, na.rm = TRUE)),
+    num_of_rides = n()
+  )
+
+print(seasonal_analysis)
+
+{ggplot(seasonal_analysis, aes(x=season,y=mean_ride_length,fill=member_casual, group=member_casual)) + 
+    geom_col(position = "dodge") +
+    labs(title = "Mean Ride Length Each Season", subtitle = "By User Type",x ="Season", y="Mean Ride Length",
+         fill ="member_casual")}
+```
+
+
+#### Checking to see how members and casual users ride length and number of rides differ during the weekdays and weekends. 
+```{r warning=FALSE}
+#Create new column "weekday_vs_weekday" based on the "started_at" date
+trip_subdata <- trip_subdata %>%
+  mutate(weekday_weekend = case_when(
+    day_of_week %in% c(2,3,4,5,6) ~ "Weekday",
+    TRUE ~ "Weekend"
+  ))
+
+weekday_vs_weekend <- trip_subdata %>%
+  group_by(weekday_weekend,member_casual) %>%
+  summarise(
+    mean_ride_length = hms::hms(seconds = mean(ride_length_seconds, na.rm = TRUE)),
+    num_of_rides = n()
+  )
+
+print(weekday_vs_weekend)
+
+
+{ggplot(weekday_vs_weekend, aes(x=weekday_weekend,y=mean_ride_length,fill=member_casual, group=member_casual)) + 
+    geom_col(position = "dodge") +
+    labs(title = "Mean Weekday Ride Length VS Mean Weekday Ride Length ", subtitle = "By User Type",x ="Weekday Vs Weekend", y="Mean Ride Length",
+         fill ="member_casual")}
+```
+
+#### Overall, the analysis reveals that casual and member users exhibit distinct ride behaviors, with casual users taking longer and more diverse rides, while member users take more frequent but shorter rides, primarily using electric bikes.
+
+## END OF ANALYSIS
